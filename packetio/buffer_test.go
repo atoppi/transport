@@ -331,27 +331,19 @@ func TestBufferLimitSizes(t *testing.T) {
 		128 * 1024,
 		1024 * 1024,
 		8 * 1024 * 1024,
-		0, // default
 	}
 	const headerSize = 2
 	const packetSize = 0x8000
 
 	for _, size := range sizes {
 		size := size
-		name := "default"
-		if size > 0 {
-			name = fmt.Sprintf("%dkBytes", size/1024)
-		}
+		name := fmt.Sprintf("%dkBytes", size/1024)
 
 		t.Run(name, func(t *testing.T) {
 			assert := assert.New(t)
 
 			buffer := NewBuffer()
-			if size == 0 {
-				size = maxSize
-			} else {
-				buffer.SetLimitSize(size + headerSize)
-			}
+			buffer.SetLimitSize(size + headerSize)
 			now := time.Now()
 			assert.NoError(buffer.SetReadDeadline(now.Add(5 * time.Second))) // Set deadline to avoid test deadlock
 

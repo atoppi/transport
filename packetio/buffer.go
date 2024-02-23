@@ -7,6 +7,7 @@ package packetio
 import (
 	"errors"
 	"io"
+	"math"
 	"sync"
 	"time"
 
@@ -50,7 +51,7 @@ type Buffer struct {
 const (
 	minSize    = 2048
 	cutoffSize = 128 * 1024
-	maxSize    = 4 * 1024 * 1024
+	maxSize    = math.MaxInt // same as bytes.Buffer
 )
 
 // NewBuffer creates a new Buffer.
@@ -331,7 +332,7 @@ func (b *Buffer) size() int {
 
 // SetLimitSize controls the maximum number of bytes that can be buffered.
 // Causes Write to return ErrFull when this limit is reached.
-// A zero value means 4MB since v0.11.0.
+// A zero value means math.MaxInt since v2.2.5.
 //
 // User can set packetioSizeHardLimit build tag to enable 4MB hard limit.
 // When packetioSizeHardLimit build tag is set, SetLimitSize exceeding
