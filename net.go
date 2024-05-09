@@ -217,6 +217,19 @@ type Dialer interface {
 	Dial(network, address string) (net.Conn, error)
 }
 
+type ReaderWithAncillary interface {
+	ReadWithAncillary(p []byte, a *uint16) (int, error)
+}
+
+type WriterWithAncillary interface {
+	WriteWithAncillary(p []byte, a *uint16) (int, error)
+}
+
+type ConnWithAncillary interface {
+	net.Conn
+	ReaderWithAncillary
+}
+
 // UDPConn is packet-oriented connection for UDP.
 type UDPConn interface {
 	// Close closes the connection.

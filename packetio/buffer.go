@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pion/transport/v3"
 	"github.com/pion/transport/v3/deadline"
 )
 
@@ -48,6 +49,12 @@ type Buffer struct {
 	readDeadline *deadline.Deadline
 }
 
+type ReadWriteCloserWithAncillary interface {
+	io.ReadWriteCloser
+	transport.ReaderWithAncillary
+	transport.WriterWithAncillary
+}
+
 const (
 	minSize    = 2048
 	cutoffSize = 128 * 1024
@@ -70,7 +77,7 @@ func (b *Buffer) available(size int) bool {
 		available += len(b.data)
 	}
 	// we interpret head=tail as empty, so always keep a byte free
-	if size+2+1 > available {
+	if size+4+1 > available {
 		return false
 	}
 
@@ -120,11 +127,12 @@ func (b *Buffer) grow() error {
 	return nil
 }
 
-// Write appends a copy of the packet data to the buffer.
+// Write appends a copy of the packet data to the buffer, prepending data with an optional 2-bytes word of ancillary data.
+// When the pointer is nil, ancillary data written to the buffer will be zero.
 // Returns ErrFull if the packet doesn't fit.
 //
 // Note that the packet size is limited to 65536 bytes since v0.11.0 due to the internal data structure.
-func (b *Buffer) Write(packet []byte) (int, error) {
+func (b *Buffer) WriteWithAncillary(packet []byte, ancillary *uint16) (int, error) {
 	if len(packet) >= 0x10000 {
 		return 0, errPacketTooBig
 	}
@@ -137,7 +145,7 @@ func (b *Buffer) Write(packet []byte) (int, error) {
 	}
 
 	if (b.limitCount > 0 && b.count >= b.limitCount) ||
-		(b.limitSize > 0 && b.size()+2+len(packet) > b.limitSize) {
+		(b.limitSize > 0 && b.size()+4+len(packet) > b.limitSize) {
 		b.mutex.Unlock()
 		return 0, ErrFull
 	}
@@ -149,6 +157,22 @@ func (b *Buffer) Write(packet []byte) (int, error) {
 			b.mutex.Unlock()
 			return 0, err
 		}
+	}
+
+	// store ancillary data
+	var anc uint16
+	if ancillary != nil {
+		anc = *ancillary
+	}
+	b.data[b.tail] = uint8(anc >> 8)
+	b.tail++
+	if b.tail >= len(b.data) {
+		b.tail = 0
+	}
+	b.data[b.tail] = uint8(anc)
+	b.tail++
+	if b.tail >= len(b.data) {
+		b.tail = 0
 	}
 
 	// store the length of the packet
@@ -188,11 +212,16 @@ func (b *Buffer) Write(packet []byte) (int, error) {
 	return len(packet), nil
 }
 
+func (b *Buffer) Write(packet []byte) (int, error) {
+	return b.WriteWithAncillary(packet, nil)
+}
+
 // Read populates the given byte slice, returning the number of bytes read.
+// An optional pointer can be passed to also read 2 bytes of ancillary data.
 // Blocks until data is available or the buffer is closed.
 // Returns io.ErrShortBuffer is the packet is too small to copy the Write.
 // Returns io.EOF if the buffer is closed.
-func (b *Buffer) Read(packet []byte) (n int, err error) { //nolint:gocognit
+func (b *Buffer) ReadWithAncillary(packet []byte, ancillary *uint16) (n int, err error) { //nolint:gocognit
 	// Return immediately if the deadline is already exceeded.
 	select {
 	case <-b.readDeadline.Done():
@@ -204,6 +233,27 @@ func (b *Buffer) Read(packet []byte) (n int, err error) { //nolint:gocognit
 		b.mutex.Lock()
 
 		if b.head != b.tail {
+			// parse ancillary data
+			if ancillary != nil {
+				an1 := b.data[b.head]
+				b.head++
+				if b.head >= len(b.data) {
+					b.head = 0
+				}
+				an2 := b.data[b.head]
+				b.head++
+				if b.head >= len(b.data) {
+					b.head = 0
+				}
+				anc := uint16((uint16(an1) << 8) | uint16(an2))
+				*ancillary = anc
+			} else {
+				b.head = b.head + 2
+				if b.head >= len(b.data) {
+					b.head = b.head - len(b.data)
+				}
+			}
+
 			// decode the packet size
 			n1 := b.data[b.head]
 			b.head++
@@ -268,6 +318,10 @@ func (b *Buffer) Read(packet []byte) (n int, err error) { //nolint:gocognit
 		case <-b.notify:
 		}
 	}
+}
+
+func (b *Buffer) Read(packet []byte) (int, error) {
+	return b.ReadWithAncillary(packet, nil)
 }
 
 // Close the buffer, unblocking any pending reads.

@@ -31,6 +31,20 @@ func TestBuffer(t *testing.T) {
 	assert.Equal(2, n)
 	assert.Equal([]byte{0, 1}, packet[:n])
 
+	// Write once with ancillary
+	var ancToWrite uint16 = 0x0ff0
+	n, err = buffer.WriteWithAncillary([]byte{2, 3}, &ancToWrite)
+	assert.NoError(err)
+	assert.Equal(2, n)
+
+	// Read once with ancillary
+	var ancToRead uint16
+	n, err = buffer.ReadWithAncillary(packet, &ancToRead)
+	assert.NoError(err)
+	assert.Equal(2, n)
+	assert.Equal([]byte{2, 3}, packet[:n])
+	assert.Equal(ancToWrite, ancToRead)
+
 	// Read deadline
 	err = buffer.SetReadDeadline(time.Unix(0, 1))
 	assert.NoError(err)
@@ -46,11 +60,11 @@ func TestBuffer(t *testing.T) {
 	assert.NoError(err)
 
 	// Write twice
-	n, err = buffer.Write([]byte{2, 3, 4})
+	n, err = buffer.Write([]byte{4, 5, 6})
 	assert.NoError(err)
 	assert.Equal(3, n)
 
-	n, err = buffer.Write([]byte{5, 6, 7})
+	n, err = buffer.Write([]byte{7, 8, 9})
 	assert.NoError(err)
 	assert.Equal(3, n)
 
@@ -58,12 +72,12 @@ func TestBuffer(t *testing.T) {
 	n, err = buffer.Read(packet)
 	assert.NoError(err)
 	assert.Equal(3, n)
-	assert.Equal([]byte{2, 3, 4}, packet[:n])
+	assert.Equal([]byte{4, 5, 6}, packet[:n])
 
 	n, err = buffer.Read(packet)
 	assert.NoError(err)
 	assert.Equal(3, n)
-	assert.Equal([]byte{5, 6, 7}, packet[:n])
+	assert.Equal([]byte{7, 8, 9}, packet[:n])
 
 	// Write once prior to close.
 	_, err = buffer.Write([]byte{3})
@@ -254,7 +268,8 @@ func TestBufferLimitSize(t *testing.T) {
 	assert := assert.New(t)
 
 	buffer := NewBuffer()
-	buffer.SetLimitSize(11)
+	// tot payload bytes + N*(2 hdr bytes + 2 anc bytes)
+	buffer.SetLimitSize(5 + 3*4)
 
 	assert.Equal(0, buffer.Size())
 
@@ -262,23 +277,23 @@ func TestBufferLimitSize(t *testing.T) {
 	n, err := buffer.Write([]byte{0, 1})
 	assert.NoError(err)
 	assert.Equal(2, n)
-	assert.Equal(4, buffer.Size())
+	assert.Equal(6, buffer.Size())
 
 	n, err = buffer.Write([]byte{2, 3})
 	assert.NoError(err)
 	assert.Equal(2, n)
-	assert.Equal(8, buffer.Size())
+	assert.Equal(12, buffer.Size())
 
 	// Over capacity
 	_, err = buffer.Write([]byte{4, 5})
 	assert.Equal(ErrFull, err)
-	assert.Equal(8, buffer.Size())
+	assert.Equal(12, buffer.Size())
 
 	// Cheeky write at exact size.
 	n, err = buffer.Write([]byte{6})
 	assert.NoError(err)
 	assert.Equal(1, n)
-	assert.Equal(11, buffer.Size())
+	assert.Equal(17, buffer.Size())
 
 	// Read once
 	packet := make([]byte, 4)
@@ -286,31 +301,31 @@ func TestBufferLimitSize(t *testing.T) {
 	assert.NoError(err)
 	assert.Equal(2, n)
 	assert.Equal([]byte{0, 1}, packet[:n])
-	assert.Equal(7, buffer.Size())
+	assert.Equal(11, buffer.Size())
 
 	// Write once
 	n, err = buffer.Write([]byte{7, 8})
 	assert.NoError(err)
 	assert.Equal(2, n)
-	assert.Equal(11, buffer.Size())
+	assert.Equal(17, buffer.Size())
 
 	// Over capacity
 	_, err = buffer.Write([]byte{9, 10})
 	assert.Equal(ErrFull, err)
-	assert.Equal(11, buffer.Size())
+	assert.Equal(17, buffer.Size())
 
 	// Read everything
 	n, err = buffer.Read(packet)
 	assert.NoError(err)
 	assert.Equal(2, n)
 	assert.Equal([]byte{2, 3}, packet[:n])
-	assert.Equal(7, buffer.Size())
+	assert.Equal(11, buffer.Size())
 
 	n, err = buffer.Read(packet)
 	assert.NoError(err)
 	assert.Equal(1, n)
 	assert.Equal([]byte{6}, packet[:n])
-	assert.Equal(4, buffer.Size())
+	assert.Equal(6, buffer.Size())
 
 	n, err = buffer.Read(packet)
 	assert.NoError(err)
@@ -333,7 +348,7 @@ func TestBufferLimitSizes(t *testing.T) {
 		8 * 1024 * 1024,
 		0, // default
 	}
-	const headerSize = 2
+	const headerSize = 4
 	const packetSize = 0x8000
 
 	for _, size := range sizes {
